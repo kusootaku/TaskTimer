@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TaskTimer</title>
+    <style>
+        /* --- 基本スタイル --- */
+        body { font-family: sans-serif; line-height: 1.6; padding: 15px; max-width: 600px; margin: 0 auto; background-color: #f4f4f4; }
+        h1, h2, h3 { color: #333; text-align: center; }
+        .screen { display: none; background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .screen.active { display: block; }
+        label { display: inline-block; min-width: 80px; margin-bottom: 5px; color: #555; vertical-align: middle;}
+        input[type="text"], input[type="number"], select { padding: 8px; margin-right: 10px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 10px; vertical-align: middle;}
+        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; margin: 0 5px; vertical-align: middle;}
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        button:hover:not(:disabled) { background-color: #0056b3; }
+        button.delete-btn, button#delete-preset-btn { background-color: #dc3545; }
+        button.delete-btn:hover:not(:disabled), button#delete-preset-btn:hover:not(:disabled) { background-color: #c82333; }
+        button#pause-resume-btn { background-color: #ffc107; color: #333; }
+        button#pause-resume-btn:hover:not(:disabled) { background-color: #e0a800; }
+        button#skip-btn { background-color: #6c757d; }
+        button#skip-btn:hover:not(:disabled) { background-color: #5a6268; }
+        hr { margin: 25px 0; border: 0; border-top: 1px solid #eee; }
+
+        /* --- タスクリスト & ドラッグドロップ用スタイル --- */
+        #task-list { list-style: none; padding: 0; margin-top: 10px; }
+        #task-list li {
+            margin-bottom: 10px; padding: 10px; border: 1px solid #eee; border-radius: 4px;
+            display: flex; justify-content: space-between; align-items: center;
+            background-color: #fff;
+            cursor: grab;
+            transition: background-color 0.2s, opacity 0.2s, border-top 0.1s;
+        }
+        #task-list li.dragging { opacity: 0.5; background-color: #e0e0e0; cursor: grabbing; }
+        #task-list li.drag-over { border-top: 3px solid #007bff; }
+        #task-list li span { flex-grow: 1; margin-right: 10px; }
+        #task-list li div button { padding: 5px 10px; font-size: 0.9em; margin-left: 5px; }
+
+        /* --- 時間入力フィールド用スタイル --- */
+        #add-task-form .time-input-container { margin-bottom: 15px;}
+        #add-task-form .time-input-group { display: inline-block; margin-right: 15px; }
+        #add-task-form .time-input-group label { min-width: auto; margin-right: 5px;}
+        #add-task-form .time-input-group input[type="number"] { width: 60px; }
+        #add-task-form .time-input-group span { margin-left: 2px; }
+
+        /* --- タイマー & プリセット & レスポンシブ --- */
+        #timer-display { font-size: 4em; font-weight: bold; text-align: center; margin: 30px 0; color: #333; }
+        #timer-controls { text-align: center; margin-bottom: 20px; display: flex; justify-content: center; flex-wrap: wrap; }
+        #timer-controls button { margin: 5px; font-size: 1.1em; padding: 10px 20px; }
+        #current-task-display { text-align: center; margin-bottom: 15px; font-size: 1.1em; }
+        #current-task-display strong { color: #007bff; }
+        #preset-controls div { margin-bottom: 15px; display: flex; flex-wrap: wrap; align-items: center; }
+        #preset-controls label { margin-bottom: 0; }
+        #preset-controls select, #preset-controls input { flex-grow: 1; min-width: 150px; margin-right: 10px;}
+        #preset-controls button { margin-left: 0; margin-top: 5px; }
+        @media (max-width: 600px) {
+            #preset-controls div { flex-direction: column; align-items: stretch; }
+            #preset-controls label, #preset-controls select, #preset-controls input, #preset-controls button { width: auto; margin-right: 0; margin-left: 0; margin-bottom: 10px; }
+            #add-task-form > div:not(.time-input-container) { display: flex; flex-direction: column; align-items: stretch; }
+            #add-task-form input[type="text"] { width: auto; }
+            #add-task-form .time-input-container { display: flex; flex-direction: column; align-items: flex-start;}
+             #timer-display { font-size: 3em; }
+             #timer-controls button { font-size: 1em; padding: 8px 15px; }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>TaskTimer アプリケーション</h1>
+
+    <div id="settings-screen" class="screen active">
+        <h2>タスク設定</h2>
+        <form id="add-task-form">
+            <h3>新しいタスクを追加</h3>
+            <div>
+                <label for="task-title">タスク名:</label>
+                <input type="text" id="task-title" placeholder="例: 資料作成" required>
+            </div>
+            <div class="time-input-container">
+                <label>時間:</label>
+                <div class="time-input-group">
+                    <input type="number" id="task-duration-min" placeholder="0" min="0" value="0"> <span>分</span>
+                </div>
+                <div class="time-input-group">
+                    <input type="number" id="task-duration-sec" placeholder="0" min="0" max="59" value="0" required> <span>秒</span>
+                </div>
+            </div>
+            <button type="submit">追加</button>
+        </form>
+        <hr>
+        <h3>タスクリスト (ドラッグ＆ドロップで並び替え)</h3>
+        <ul id="task-list"></ul>
+        <hr>
+        <h3>プリセット管理</h3>
+        <div id="preset-controls">
+            <div>
+                <label for="preset-select">プリセット:</label>
+                <select id="preset-select"><option value="">--選択してください--</option></select>
+                <button id="load-preset-btn">読み込む</button>
+                <button id="delete-preset-btn">削除</button>
+            </div>
+            <div>
+                <label for="save-preset-name">現在のリストを保存:</label>
+                <input type="text" id="save-preset-name" placeholder="新しいプリセット名">
+                <button id="save-preset-btn">保存</button>
+            </div>
+        </div>
+        <hr>
+        <button id="goto-timer-btn">タイマー画面へ</button>
+    </div>
+
+    <audio id="alarm-sound" src="alarm.mp3" preload="auto"></audio>
+
+    <div id="timer-screen" class="screen">
+        <h2>タイマー実行</h2>
+        <div id="current-task-display">
+            <p>現在のタスク: <strong id="current-task-name">待機中</strong></p>
+            <p>次のタスク: <span id="next-task-name">なし</span></p>
+        </div>
+        <div id="timer-display">
+            <span id="time-left">00:00</span>
+        </div>
+        <div id="timer-controls">
+            <button id="start-next-btn">スタート</button>
+            <button id="pause-resume-btn" style="display: none;">一時停止</button>
+            <button id="skip-btn">スキップ</button>
+        </div>
+        <button id="goto-settings-btn">設定画面に戻る</button>
+    </div>
+
+
+    <script>
+        // --- DOM Elements ---
+        const settingsScreen = document.getElementById('settings-screen');
+        const timerScreen = document.getElementById('timer-screen');
+        const taskTitleInput = document.getElementById('task-title');
+        const taskDurationMinInput = document.getElementById('task-duration-min');
+        const taskDurationSecInput = document.getElementById('task-duration-sec');
+        const addTaskForm = document.getElementById('add-task-form');
+        const taskListUl = document.getElementById('task-list');
+        const presetSelect = document.getElementById('preset-select');
+        const loadPresetBtn = document.getElementById('load-preset-btn');
+        const deletePresetBtn = document.getElementById('delete-preset-btn');
+        const savePresetNameInput = document.getElementById('save-preset-name');
+        const savePresetBtn = document.getElementById('save-preset-btn');
+        const gotoTimerBtn = document.getElementById('goto-timer-btn');
+        const gotoSettingsBtn = document.getElementById('goto-settings-btn');
+        const currentTaskNameSpan = document.getElementById('current-task-name');
+        const nextTaskNameSpan = document.getElementById('next-task-name');
+        const timeLeftSpan = document.getElementById('time-left');
+        const startNextBtn = document.getElementById('start-next-btn');
+        const audioElement = document.getElementById('alarm-sound');
+        const pauseResumeBtn = document.getElementById('pause-resume-btn');
+        const skipBtn = document.getElementById('skip-btn');
+
+        // --- Application State ---
+        let tasks = [];
+        let presets = {};
+        let currentTaskIndex = -1;
+        let timerInterval = null;
+        let timeLeft = 0;
+        let isTimerRunning = false;
+        let isTimerPaused = false;
+        let draggedItemId = null;
+
+        // --- Initialization ---
+        function initializeApp() {
+            loadTasksFromLocalStorage();
+            loadPresetsFromLocalStorage();
+            renderTaskList();
+            renderPresetOptions();
+            addEventListeners();
+            addDragDropListeners();
+            updateTimerScreen('idle');
+            showScreen('settings');
+             if (!taskListUl) {
+                 console.error("initializeApp: taskListUl 要素が見つかりませんでした！イベントリスナーを設定できません。");
+             }
+        }
+
+        // --- Local Storage ---
+        function saveTasksToLocalStorage() { localStorage.setItem('tasks', JSON.stringify(tasks)); }
+        function loadTasksFromLocalStorage() { tasks = JSON.parse(localStorage.getItem('tasks') || '[]'); }
+        function savePresetsToLocalStorage() { localStorage.setItem('presets', JSON.stringify(presets)); }
+        function loadPresetsFromLocalStorage() { presets = JSON.parse(localStorage.getItem('presets') || '{}'); }
+
+        // --- Rendering ---
+        function renderTaskList() {
+            if (!taskListUl) {
+                console.error("renderTaskList: taskListUl 要素が見つかりません！再描画できません。");
+                return;
+            }
+            taskListUl.innerHTML = '';
+            if (tasks.length === 0) {
+                taskListUl.innerHTML = '<li style="cursor: default;">タスクがありません。追加してください。</li>';
+                return;
+            }
+            tasks.forEach((task, index) => {
+                const li = document.createElement('li');
+                li.setAttribute('data-id', task.id);
+                li.setAttribute('draggable', 'true');
+
+                const totalSeconds = task.duration;
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                let durationString = '';
+                 if (totalSeconds > 0) {
+                     if (minutes > 0 && seconds === 0) {
+                         durationString = `${minutes}分`;
+                     } else if (minutes === 0 && seconds > 0) {
+                         durationString = `${seconds}秒`;
+                     } else if (minutes > 0 && seconds > 0) {
+                         durationString = `${minutes}分 ${seconds}秒`;
+                     } else if (minutes === 0 && seconds === 0) {
+                         durationString = '0秒?';
+                     }
+                } else {
+                     durationString = '0秒';
+                }
+
+
+                li.innerHTML = `
+                    <span>${index + 1}. ${task.title} (${durationString.trim()})</span>
+                    <div>
+                        <button class="delete-btn">削除</button>
+                    </div>
+                `;
+
+
+                taskListUl.appendChild(li);
+            });
+        }
+
+        function renderPresetOptions() {
+            const currentSelection = presetSelect.value;
+            presetSelect.innerHTML = '<option value="">--選択してください--</option>';
+            for (const presetName in presets) {
+                const option = document.createElement('option');
+                option.value = presetName;
+                option.textContent = presetName;
+                presetSelect.appendChild(option);
+            }
+             if (presets[currentSelection]) {
+                presetSelect.value = currentSelection;
+            } else {
+                 presetSelect.value = "";
+            }
+        }
+
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+        }
+
+        function updateTimerDisplay() { timeLeftSpan.textContent = formatTime(timeLeft); }
+
+        // --- UI State Update ---
+         function updateTimerScreen(status = 'idle') {
+             // アラーム停止は、ユーザー操作に関連するハンドラで行う
+
+            const hasTasks = tasks.length > 0;
+            let isCurrentTaskValid = currentTaskIndex >= 0 && currentTaskIndex < tasks.length;
+
+
+            if (isCurrentTaskValid) {
+                currentTaskNameSpan.textContent = tasks[currentTaskIndex].title;
+                if (status !== 'paused' && status !== 'running') {
+                     timeLeft = tasks[currentTaskIndex]?.duration || 0;
+                }
+                 nextTaskNameSpan.textContent = (currentTaskIndex + 1 < tasks.length) ? tasks[currentTaskIndex + 1].title : 'なし';
+            } else {
+                currentTaskNameSpan.textContent = (status === 'all_finished') ? '完了' : '待機中';
+                nextTaskNameSpan.textContent = (status === 'idle' && hasTasks) ? (tasks[0]?.title || 'なし') : 'なし';
+                timeLeft = 0;
+            }
+             updateTimerDisplay();
+
+
+            // Button states based on the status
+            startNextBtn.disabled = true;
+            pauseResumeBtn.disabled = true;
+            pauseResumeBtn.style.display = 'none';
+            skipBtn.disabled = true;
+
+
+            switch (status) {
+                case 'idle':
+                    startNextBtn.textContent = 'スタート';
+                    startNextBtn.disabled = !hasTasks;
+                    skipBtn.disabled = true;
+                    currentTaskIndex = -1;
+                    isTimerRunning = false;
+                    isTimerPaused = false;
+                    break;
+
+                case 'select_first':
+                case 'select_next':
+                    if (isCurrentTaskValid) {
+                        startNextBtn.textContent = `「${tasks[currentTaskIndex].title}」を開始`;
+                        startNextBtn.disabled = false;
+                        skipBtn.disabled = false;
+                         isTimerRunning = false;
+                         isTimerPaused = false;
+                    } else {
+                         updateTimerScreen('idle');
+                    }
+                    break;
+
+                case 'running':
+                    startNextBtn.textContent = '実行中...';
+                    startNextBtn.disabled = true;
+                    pauseResumeBtn.textContent = '一時停止';
+                    pauseResumeBtn.disabled = false;
+                    pauseResumeBtn.style.display = 'inline-block';
+                    skipBtn.disabled = false;
+                    break;
+
+                case 'paused':
+                    startNextBtn.textContent = '実行中...';
+                    startNextBtn.disabled = true;
+                    pauseResumeBtn.textContent = '再開';
+                    pauseResumeBtn.disabled = false;
+                    pauseResumeBtn.style.display = 'inline-block';
+                    skipBtn.disabled = false;
+                    break;
+
+                case 'all_finished':
+                    startNextBtn.textContent = '完了';
+                    startNextBtn.disabled = true;
+                    skipBtn.disabled = true;
+                    currentTaskIndex = -1;
+                    isTimerRunning = false;
+                    isTimerPaused = false;
+                    break;
+
+                default:
+                     console.error("updateTimerScreen: 未知のステータス:", status);
+                     updateTimerScreen('idle');
+            }
+        }
+
+        // --- Event Handlers ---
+        function handleAddTask(event) {
+            event.preventDefault();
+            const title = taskTitleInput.value.trim();
+            const durationMinutes = parseInt(taskDurationMinInput.value, 10) || 0;
+            const durationSeconds = parseInt(taskDurationSecInput.value, 10) || 0;
+            const totalDurationSeconds = (durationMinutes * 60) + durationSeconds;
+
+            if (title && totalDurationSeconds > 0) {
+                const newTask = { id: `task-${Date.now()}-${Math.random().toString(36).substring(7)}`, title: title, duration: totalDurationSeconds };
+                tasks.push(newTask);
+                saveTasksToLocalStorage();
+                renderTaskList();
+                taskTitleInput.value = '';
+                taskDurationMinInput.value = '0';
+                taskDurationSecInput.value = '0';
+                if (!isTimerRunning && !isTimerPaused) {
+                    updateTimerScreen('idle');
+                }
+            } else if (!title) {
+                 alert('タスク名を入力してください。');
+            } else {
+                 alert('有効な時間（1秒以上）を入力してください。');
+            }
+        }
+
+        function handleDeleteTask(taskId) {
+            const deletedTaskIndex = tasks.findIndex(task => task.id === taskId);
+            if (deletedTaskIndex === -1) {
+                console.warn("handleDeleteTask: 削除対象IDが見つかりません:", taskId);
+                return;
+            }
+
+            tasks = tasks.filter(task => task.id !== taskId);
+            saveTasksToLocalStorage();
+            renderTaskList();
+
+            stopTimer();
+            stopAlarm(); // 削除時もアラーム停止
+
+            if (tasks.length === 0) {
+                updateTimerScreen('all_finished');
+            } else {
+                updateTimerScreen('idle');
+            }
+        }
+
+        function handleLoadPreset() {
+            const selectedPresetName = presetSelect.value;
+            if (!selectedPresetName) {
+                alert('読み込むプリセットを選択してください。');
+                return;
+            }
+
+            if (presets[selectedPresetName]) {
+                 if (tasks.length > 0 && !confirm('現在のタスクリストが上書きされます。よろしいですか？')) {
+                     return;
+                 }
+                tasks = presets[selectedPresetName].map(taskData => ({
+                    id: `task-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+                    title: taskData.title,
+                    duration: taskData.duration
+                }));
+
+                saveTasksToLocalStorage();
+                renderTaskList();
+                 alert(`プリセット「${selectedPresetName}」を読み込みました。`);
+                 stopTimer();
+                 stopAlarm(); // プリセット読み込み時もアラーム停止
+                 updateTimerScreen('idle');
+            } else {
+                 alert('選択されたプリセットが見つかりません。');
+                 console.error("handleLoadPreset: 選択されたプリセットデータが見つかりません。");
+            }
+        }
+        function handleSavePreset() {
+            const presetName = savePresetNameInput.value.trim();
+            if (!presetName) {
+                alert('プリセット名を入力してください。');
+                return;
+            }
+            if (tasks.length === 0) {
+                alert('保存するタスクがリストにありません。');
+                return;
+            }
+            if (presets[presetName] && !confirm(`プリセット「${presetName}」は既に存在します。上書きしますか？`)) {
+                return;
+            }
+            const tasksToSave = tasks.map(task => ({ title: task.title, duration: task.duration }));
+            presets[presetName] = tasksToSave;
+            savePresetsToLocalStorage();
+            renderPresetOptions();
+            savePresetNameInput.value = '';
+            alert(`現在のタスクリストをプリセット「${presetName}」として保存しました。`);
+        }
+        function handleDeletePreset() {
+            const selectedPresetName = presetSelect.value;
+            if (!selectedPresetName) {
+                alert('削除するプリセットを選択してください。');
+                return;
+            }
+            if (presets[selectedPresetName]) {
+                 if (confirm(`プリセット「${selectedPresetName}」を削除してもよろしいですか？`)) {
+                    delete presets[selectedPresetName];
+                    savePresetsToLocalStorage();
+                    renderPresetOptions();
+                    alert(`プリセット「${selectedPresetName}」を削除しました。`);
+                }
+            } else {
+                 alert('選択されたプリセットが見つかりません。');
+            }
+        }
+        function gotoTimerScreen() {
+             if (tasks.length === 0) {
+                 alert('タイマーを開始するには、まずタスクを追加してください。');
+                 return;
+             }
+            stopTimer();
+            stopAlarm(); // 遷移時もアラーム停止
+            currentTaskIndex = 0;
+            updateTimerScreen('select_first');
+            showScreen('timer');
+        }
+        function gotoSettingsScreen() {
+            stopTimer();
+            stopAlarm(); // 設定画面に戻る際もアラーム停止
+            updateTimerScreen('idle');
+            showScreen('settings');
+        }
+
+        // --- Timer Control Handlers ---
+         function handleStartNext() {
+            stopAlarm(); // スタートボタンクリックで呼ばれるため、アラーム停止
+            if (isTimerRunning || isTimerPaused) {
+                 return;
+            }
+
+             if ((currentTaskIndex === -1 || currentTaskIndex >= tasks.length) && tasks.length > 0) {
+                 currentTaskIndex = 0;
+             } else if (tasks.length === 0) {
+                  updateTimerScreen('idle');
+                 return;
+             } else if (!(currentTaskIndex >= 0 && currentTaskIndex < tasks.length)) {
+                 console.error("handleStartNext: 想定外の状態 currentTaskIndex=", currentTaskIndex);
+                 updateTimerScreen('idle');
+                 return;
+             }
+
+
+             if (currentTaskIndex >= 0 && currentTaskIndex < tasks.length) {
+                 startTimer(); // startTimer の冒頭でも stopAlarm() が呼ばれます（二重になりますが安全のため両方に置きます）
+             } else {
+                 console.error("handleStartNext: 開始直前に currentTaskIndex が無効になりました。idleへ遷移。");
+                 updateTimerScreen('idle');
+             }
+        }
+         function handlePauseResume() {
+            if (!isTimerRunning && !isTimerPaused) {
+                 return;
+            }
+
+            if (isTimerPaused) { // 一時停止状態 -> 再開
+                isTimerPaused = false;
+                updateTimerScreen('running');
+            } else { // 実行中状態 -> 一時停止
+                isTimerPaused = true;
+                updateTimerScreen('paused');
+            }
+        }
+        function handleSkipTask() {
+            if (currentTaskIndex < 0 || currentTaskIndex >= tasks.length) {
+                 return;
+            }
+
+            stopTimer();
+            stopAlarm(); // スキップ時もアラーム停止
+
+            const skippedTaskTitle = tasks[currentTaskIndex]?.title || "Unknown";
+            console.log(`handleSkipTask: タスク「${skippedTaskTitle}」(インデックス: ${currentTaskIndex}) をスキップします。`);
+
+            currentTaskIndex++;
+
+            if (currentTaskIndex < tasks.length) {
+                console.log("handleSkipTask: 次のタスクが存在します。インデックス:", currentTaskIndex);
+                updateTimerScreen('select_next');
+            } else {
+                console.log("handleSkipTask: 全てのタスクをスキップしました。all_finishedへ遷移。");
+                updateTimerScreen('all_finished');
+            }
+        }
+
+        // --- Timer Logic ---
+        function startTimer() {
+            stopAlarm(); // タイマーが開始されたら必ずアラームを停止
+
+            if (isTimerRunning) {
+                 return;
+            }
+             if (currentTaskIndex < 0 || currentTaskIndex >= tasks.length) {
+                 console.error("startTimer: 無効なタスクインデックスで開始しようとしました:", currentTaskIndex);
+                 updateTimerScreen('idle');
+                 return;
+             }
+             if (isTimerPaused) {
+                 return; // ここでは開始しない
+             }
+
+            isTimerRunning = true;
+            isTimerPaused = false;
+
+            if (timeLeft <= 0) {
+                 timeLeft = tasks[currentTaskIndex].duration;
+                 if (timeLeft <= 0) {
+                      console.warn(`startTimer: タスク[${currentTaskIndex}]の持続時間が無効 (${tasks[currentTaskIndex].duration}s)。即完了扱い。`);
+                      handleTaskCompletion();
+                      return;
+                 }
+            }
+
+            updateTimerScreen('running');
+
+            if (timerInterval) {
+                clearInterval(timerInterval);
+            }
+
+            timerInterval = setInterval(() => {
+                if (isTimerPaused || !isTimerRunning) {
+                    return;
+                }
+
+                timeLeft--;
+                updateTimerDisplay();
+
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    timerInterval = null;
+                    isTimerRunning = false;
+                    isTimerPaused = false;
+
+                    playAlarm(); // タスク完了時にアラーム再生
+
+                    handleTaskCompletion(); // handleTaskCompletion()はplayAlarm()の後に呼ばれます
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+            isTimerRunning = false;
+            isTimerPaused = false;
+        }
+
+        function handleTaskCompletion() {
+            const finishedTaskIndex = currentTaskIndex;
+            console.log(`handleTaskCompletion: タスク「${tasks[finishedTaskIndex]?.title}」(インデックス: ${finishedTaskIndex}) が完了しました。`);
+
+            // playAlarm() は timerInterval の中で timeLeft <= 0 になった直前に呼ばれています
+
+            currentTaskIndex++;
+
+            if (currentTaskIndex < tasks.length) {
+                console.log("handleTaskCompletion: 次のタスクが存在します。インデックス:", currentTaskIndex);
+                updateTimerScreen('select_next'); // UIは次のタスク準備状態へ
+                // 修正点: ここではアラームは止めない！ユーザーがスタートボタンを押すまで鳴り続ける
+            } else {
+                console.log("handleTaskCompletion: 全てのタスクが完了しました。all_finishedへ遷移。");
+                updateTimerScreen('all_finished'); // UIは完了状態へ
+                 // 全タスク完了時も、ユーザーが操作するまでアラームは鳴り続ける
+            }
+        }
+
+         // --- Audio Control ---
+         function playAlarm() {
+             if (!audioElement) {
+                 console.error("playAlarm: オーディオ要素 #alarm-sound が見つかりません！");
+                 return;
+             }
+             if (audioElement.readyState < 2) {
+                  console.warn("playAlarm: オーディオはまだ再生準備ができていません (readyState: " + audioElement.readyState + ")。");
+             }
+
+             if (audioElement.readyState >= 2) {
+                audioElement.currentTime = 0;
+                audioElement.play().then(() => {
+                     console.log("playAlarm: 再生成功 (Promise resolved)");
+                }).catch(error => {
+                    console.warn("playAlarm: 自動再生失敗 (ユーザー操作が必要かもしれません):", error);
+                });
+             }
+        }
+        function stopAlarm() {
+             if (!audioElement) {
+                 console.warn("stopAlarm: オーディオ要素 #alarm-sound が見つかりません。停止できません。");
+                 return;
+             }
+            if (!audioElement.paused) {
+                audioElement.pause();
+                audioElement.currentTime = 0;
+                console.log("stopAlarm: 停止完了。");
+            } else {
+                // 既に停止している場合のログは不要
+            }
+        }
+
+        // --- Screen Management ---
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(screen => {
+                screen.classList.remove('active');
+            });
+            const activeScreen = document.getElementById(`${screenId}-screen`);
+            if (activeScreen) {
+                activeScreen.classList.add('active');
+            } else {
+                 console.error(`showScreen: 画面要素 "${screenId}-screen" が見つかりませんでした。`);
+            }
+        }
+
+
+         // --- Drag & Drop Event Handlers ---
+         function handleDragStart(event) {
+             if (!event.target.matches('li')) {
+                 return;
+             }
+             try {
+                 const li = event.target;
+                 draggedItemId = li.getAttribute('data-id');
+                 event.dataTransfer.setData('text/plain', draggedItemId);
+                 event.dataTransfer.effectAllowed = 'move';
+                 li.classList.add('dragging');
+                 console.log('handleDragStart: ドラッグ開始 ID:', draggedItemId);
+             } catch (e) {
+                 console.error("handleDragStart でエラー:", e);
+                 draggedItemId = null;
+             }
+         }
+
+         function handleDragOver(event) {
+             event.preventDefault();
+             event.dataTransfer.dropEffect = 'move';
+
+             const targetLi = event.target.closest('li');
+             document.querySelectorAll('#task-list li.drag-over').forEach(li => li.classList.remove('drag-over'));
+
+             if (targetLi && targetLi.getAttribute('data-id') !== draggedItemId) {
+                 targetLi.classList.add('drag-over');
+             }
+         }
+
+         function handleDragLeave(event) {
+              const targetLi = event.target.closest('li');
+             if (targetLi) {
+                 targetLi.classList.remove('drag-over');
+             }
+         }
+
+         function handleDragEnd(event) {
+             try {
+                  if (draggedItemId) {
+                       const draggedElement = taskListUl.querySelector(`li[data-id="${draggedItemId}"]`);
+                       if (draggedElement) {
+                            draggedElement.classList.remove('dragging');
+                       }
+                  }
+                 document.querySelectorAll('#task-list li.drag-over').forEach(li => li.classList.remove('drag-over'));
+             } catch(e) {
+                 console.error("handleDragEnd でエラー:", e);
+             } finally {
+                 draggedItemId = null;
+             }
+         }
+
+         function handleDrop(event) {
+             event.preventDefault();
+             let droppedOnItemId = null;
+             try {
+                 const id = event.dataTransfer.getData('text/plain');
+
+                 const targetLi = event.target.closest('li');
+                 droppedOnItemId = targetLi?.getAttribute('data-id');
+
+                 if (targetLi) targetLi.classList.remove('drag-over');
+
+                 if (!id || !droppedOnItemId || id === droppedOnItemId) {
+                     return;
+                 }
+                 console.log(`handleDrop: ID "${id}" を ID "${droppedOnItemId}" の上にドロップ`);
+
+                 const draggedItemIndex = tasks.findIndex(task => task.id === id);
+                 let droppedOnItemIndex = tasks.findIndex(task => task.id === droppedOnItemId);
+
+                 if (draggedItemIndex === -1 || droppedOnItemIndex === -1) {
+                     console.error("handleDrop: タスク配列内でドラッグまたはドロップされたアイテムが見つかりませんでした。");
+                     return;
+                 }
+                 console.log(`handleDrop: ドラッグ元インデックス: ${draggedItemIndex}, ドロップ先インデックス: ${droppedOnItemIndex}`);
+
+                 const [draggedItem] = tasks.splice(draggedItemIndex, 1);
+
+                 const newDroppedOnItemIndex = tasks.findIndex(task => task.id === droppedOnItemId);
+
+                 if (newDroppedOnItemIndex === -1) {
+                      console.warn("handleDrop: ドロップ対象アイテムが削除後の配列で見つかりませんでした。リストの最後にアイテムを追加します。");
+                      tasks.push(draggedItem);
+                 } else {
+                     tasks.splice(newDroppedOnItemIndex, 0, draggedItem);
+                     console.log(`handleDrop: ドラッグアイテムを新しいインデックス ${newDroppedOnItemIndex} に挿入`);
+                 }
+
+                 saveTasksToLocalStorage();
+                 renderTaskList();
+
+                 if (isTimerRunning || isTimerPaused) {
+                     console.warn("handleDrop: タイマー実行中/一時停止中に並び替えが行われました。タイマーをidle状態にリセットします。");
+                     stopTimer(); // タイマーを止めたのでアラームも停止
+                     stopAlarm(); // 並び替え完了時も念のためアラーム停止
+                 } else {
+                     updateTimerScreen('idle');
+                 }
+                 // ドロップ完了ログは不要
+
+             } catch (e) {
+                 console.error("handleDrop でエラー:", e);
+             } finally {
+                   const finalDraggedItemId = event.dataTransfer.getData('text/plain');
+                   if (finalDraggedItemId) {
+                       const draggedElement = taskListUl.querySelector(`li[data-id="${finalDraggedItemId}"]`);
+                       if (draggedElement) draggedElement.classList.remove('dragging');
+                   }
+                   document.querySelectorAll('#task-list li.drag-over').forEach(li => li.classList.remove('drag-over'));
+             }
+         }
+
+
+        // --- Add Event Listeners ---
+        function addEventListeners() {
+             if (!taskListUl) {
+                 console.error("addEventListeners: taskListUl 要素が見つかりません！リスト関連のイベントリスナーを設定できません。");
+             }
+
+            // フォーム送信
+            if (addTaskForm) addTaskForm.addEventListener('submit', handleAddTask);
+            // プリセットボタン
+            if (loadPresetBtn) loadPresetBtn.addEventListener('click', handleLoadPreset);
+            if (savePresetBtn) savePresetBtn.addEventListener('click', handleSavePreset);
+            if (deletePresetBtn) deletePresetBtn.addEventListener('click', handleDeletePreset);
+            // 画面遷移ボタン
+            if (gotoTimerBtn) gotoTimerBtn.addEventListener('click', gotoTimerScreen);
+            if (gotoSettingsBtn) gotoSettingsBtn.addEventListener('click', gotoSettingsScreen);
+
+            // タイマー操作ボタン
+            if (startNextBtn) startNextBtn.addEventListener('click', handleStartNext);
+            if (pauseResumeBtn) pauseResumeBtn.addEventListener('click', handlePauseResume);
+            if (skipBtn) skipBtn.addEventListener('click', handleSkipTask);
+
+            // イベント移譲による削除ボタン処理
+            if (taskListUl) {
+                taskListUl.addEventListener('click', (event) => {
+                    const deleteButton = event.target.closest('.delete-btn');
+                    if (deleteButton) {
+                        const li = deleteButton.closest('li');
+                        if (li) {
+                            const taskId = li.getAttribute('data-id');
+                            if (taskId) {
+                                handleDeleteTask(taskId); // 削除処理関数を呼び出し
+                            } else {
+                                console.error("taskListUl Click Event: 削除ボタンの親 li に data-id が見つかりません！");
+                            }
+                        } else {
+                            console.error("taskListUl Click Event: 削除ボタンの親 li 要素が見つかりません！");
+                        }
+                        event.stopPropagation(); // クリックイベントの伝播を止める
+                    }
+                });
+            } else {
+                console.error("addEventListeners: taskListUl 要素が見つからず、クリックリスナーを設定できませんでした。");
+            }
+        }
+
+        // --- Add Drag & Drop Listeners ---
+        function addDragDropListeners() {
+             if (taskListUl) {
+                taskListUl.addEventListener('dragstart', handleDragStart);
+                taskListUl.addEventListener('dragover', handleDragOver);
+                taskListUl.addEventListener('dragleave', handleDragLeave);
+                taskListUl.addEventListener('dragend', handleDragEnd);
+                taskListUl.addEventListener('drop', handleDrop);
+             } else {
+                console.error("addDragDropListeners: taskListUl 要素が見つからず、DNDリスナーを設定できませんでした。");
+             }
+        }
+
+        // --- Start the App ---
+         document.addEventListener('DOMContentLoaded', initializeApp);
+
+    </script>
+
+</body>
+</html>
